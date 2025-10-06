@@ -1,0 +1,15 @@
+node_modules/
+.idea/
+.env*
+*.log
+cortile_tmp/
+PHP/settings.ini
+PHP/vendor/
+docs/exchanges/
+config.yaml
+config.yml
+config.json
+act-call-catch
+go-core
+test.db
+Axion/

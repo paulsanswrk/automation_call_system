@@ -1,0 +1,120 @@
+@startuml data_processing
+!theme plain
+skinparam componentStyle uml2
+skinparam backgroundColor white
+skinparam component {
+  BackgroundColor #EEEEEE
+  BorderColor #999999
+}
+skinparam database {
+  BackgroundColor #DDE6FF
+  BorderColor #5577AA
+}
+
+title Generalized Data Processing Pipeline
+
+package "Signal Sources" {
+    [Discord Client/Injector\n(WebSocket/HTTP)] as Discord
+    [Telegram\n(Webhook)] as Telegram
+    [Text File\n(Upload)] as File
+    [Frontend PWA\n(Manual Call)] as PWAManual
+}
+
+package "Go Backend - Ingestion Handlers" {
+    [DiscordHandler] as DH
+    note bottom of DH
+      Handles native Discord UI/injector POST and WS events.
+      Exposes POST /api/messages/manual for direct PWA injections.
+      Resolves thread reply contexts securely.
+    end note
+    
+    [TelegramHandler] as TH
+    note right of TH
+      Parses Telegram 'message' and 'channel_post' webhooks.
+      Constructs unique internal message_ids (tg_{chat}_{id}).
+    end note
+    
+    [FileParserHandler] as FH
+    note left of FH
+      Reads multipart/form-data text uploads from Admins.
+      Constructs single unified massive payload context to 
+      be passed into Gemini for block analysis.
+    end note
+    
+    [InsertAndProcess\n(Core deduplication)] as Dedupe
+    note right of Dedupe
+      Deduplicates by message_id and filters out 
+      chat "dust" / noise (e.g., empty payloads, 
+      unsubscribed channels) before invoking AI.
+    end note
+}
+
+database "Supabase PostgreSQL" {
+    [call_catch.discord_messages] as DBMsgs
+    [call_catch.ai_log] as DBAILog
+    [call_catch.trade_actions] as DBTrades
+    [call_catch.channel_subscriptions\n& exchange_mappings] as DBSubs
+    [call_catch.position_history] as DBPos
+}
+
+package "Trade Pipeline" {
+    [TradeProcessor] as TP
+    [Gemini API\n(Ai Analysis)] as Gemini
+    [OrderPlacer\n(Fan-out Execution)] as Placer
+}
+
+package "Exchanges (via API)" {
+    [BitUnix Provider] as BitUnix
+    [Phemex Provider] as Phemex
+}
+
+package "Live UI / WebSockets" {
+    [System UI WSHub] as UIWS
+    [Position WSHub] as PosWS
+    note bottom of PosWS
+      Strictly filters out "dust" (e.g. qty "0.00")
+      and phantom pending closed positions returned 
+      irregularly by exchange sync endpoints before 
+      reconciling state.
+    end note
+    [Frontend Dashboards\n(PWA / Flutter)] as PWADash
+}
+
+' Incoming Signals
+Discord --> DH
+PWAManual --> DH : POST /api/messages/manual\n(Forces immediate pipeline)
+Telegram --> TH
+File --> FH
+
+' Deduplication & Initial DB write
+DH --> Dedupe
+TH --> Dedupe
+FH --> Dedupe
+Dedupe --> DBMsgs : 1. Persist (dedup by message_id)
+
+' Pipeline Invocation
+Dedupe --> TP : 2. Async Trigger
+
+' AI Analysis
+TP --> Gemini : 3. Analyze text (CALL2COMMAND)
+Gemini --> TP : 4. Return parsed trade JSON
+TP --> DBAILog : 5. Persist Request/Response Log
+
+' User Resolution
+TP --> DBSubs : 6. Fetch Active Users & Mappings
+
+' Fan-Out & API Execution
+TP --> Placer : 7. Multiply actions per user map
+Placer --> BitUnix : 8. POST Orders
+Placer --> Phemex : 8. POST Orders
+Placer --> DBTrades : 9. Record trade action results
+
+' Position Sync
+BitUnix -.-> PosWS : Position Updates
+Phemex -.-> PosWS : Position Updates
+PosWS --> DBPos : Reconcile DB state
+PosWS --> PWADash : Broadcast array updates internally
+UIWS <-- DBMsgs : Push new messages
+UIWS --> PWADash : Broadcast events/trade logs
+
+@enduml
