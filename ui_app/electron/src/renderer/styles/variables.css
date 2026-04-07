@@ -1,0 +1,14 @@
+:root {
+  --surface-ground: #0f172a;
+  --surface-card: #1e293b;
+  --surface-border: #334155;
+  --surface-hover: #283548;
+  --text-color: #e2e8f0;
+  --text-color-secondary: #94a3b8;
+  --primary-color: #6366f1;
+  --primary-color-hover: #818cf8;
+  --green-badge: #22c55e;
+  --red-badge: #ef4444;
+  --amber-badge: #f59e0b;
+  --blue-accent: #3b82f6;
+}
